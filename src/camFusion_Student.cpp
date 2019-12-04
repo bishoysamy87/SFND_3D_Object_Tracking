@@ -335,7 +335,7 @@ void matchBoundingBoxes(std::vector<cv::DMatch> &matches, std::map<int, int> &bb
             smallerBox.y = (*it2).roi.y + shrinkFactor * (*it2).roi.height / 2.0;
             smallerBox.width = (*it2).roi.width * (1 - shrinkFactor);
             smallerBox.height = (*it2).roi.height * (1 - shrinkFactor);
-            if(smallerBox.contains(prevKp.pt))
+            if(smallerBox.contains(currentKp.pt))
             {
                 currBoxId = it2->boxID;
             }

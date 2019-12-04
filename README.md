@@ -30,6 +30,79 @@ In this final project, you will implement the missing parts in the schematic. To
 ## Basic Build Instructions
 
 1. Clone this repo.
-2. Make a build directory in the top level project directory: `mkdir build && cd build`
+2. Make a build directory in the top level project directory: `mkdir build && mkdir output && cd build`
 3. Compile: `cmake .. && make`
 4. Run it: `./3D_object_tracking`.
+
+## Project rubric points
+### FP.0 Final Report
+This is the report that include the information for this project.
+
+### FP.1 Match 3D Objects:
+- Implement the method "matchBoundingBoxes", which takes as input both the previous and the current data frames and provides as output the ids of the matched regions of interest (i.e. the boxID property). Matches must be the ones with the highest number of keypoint correspondences.
+- The code is functional as it get the keypoints matches between the current and previous frames and a loop over all the bounding boxes of the previous and current frames and put the box ids in multimap 
+data stucture. after that for each found current box find in the multimap the corresponding previousb boxes in another multimap with pair (prev box ids, current box id ) to get the count of each occurance happen of this current box and previous boxes, so that the boxes with high count will be the best matching bounding boxes between the current and previous.
+
+<img src="output/finalImage_AKAZE_AKAZE_0003.jpg" width="779" height="414" />
+
+### FP.2 Compute Lidar-based TTC
+- Compute the time-to-collision in second for all matched 3D objects using only Lidar measurements from the matched bounding boxes between current and previous frame. 
+
+The code functionality is to get the average, minimum of the lidar point x position in the previous and current frame, I make also a median filtering to remove the outiliers, analysis is done on which perform better (average, minimum or median), it is found median is the better perfomance to remove the outliers.
+
+
+<img src="output/lidar_ttc.png"/>
+
+
+### FP.3 Associate Keypoint Correspondences with Bounding Boxes
+
+ - Code performs as described and adds the keypoint correspondences to the "kptMatches" property of the respective bounding boxes. Also, outlier matches have been removed based on the euclidean distance between them in relation to all the matches in the bounding box. 
+
+This is done on the function "clusterKptMatchesWithROI" along with the function "computeTTCCamera"
+
+### FP.4 Compute Camera-based TTC
+
+ - Code is functional and returns the specified output. Also, the code is able to deal with outlier correspondences in a statistically robust way to avoid severe estimation errors. 
+
+The function "computeTTCCamera" is used to make the TTC calculation and it makes median filtering as well for the distance ratio in order to remove the outliers as well.
+
+### FP.5 Performance Evaluation 1
+- Several examples (2-3) have been identified and described in detail. The assertion that the TTC is off has been based on manually estimating the distance to the rear of the preceding vehicle from a top view perspective of the Lidar points.
+ 
+I don't see big drawbacks for the TTC of lidar may be because of the median filtering, however the bad thing that we assume that the velocity is constant and we don't have a measurement as well for velocity so a kind of filtering need to be done on the changes of velocities between frames.
+
+<img src="output/lidarImage0003.jpg"/>
+average x _prev = 7.95042, min = 7.849
+TTC lidar median x prev = 7.947
+TTC lidar average x curr = 7.90219, min = 7.793
+TTC lidar median x curr = 7.891, 1/vel = 1.78571
+
+<img src="output/lidarImage0004.jpg" />
+average x _prev = 7.84645, min = 7.685
+TTC lidar median x prev = 7.844
+TTC lidar average x curr = 7.78529, min = 7.638
+TTC lidar median x curr = 7.7945, 1/vel = 2.02021
+
+<img src="output/lidarImage0005.jpg" />
+average x _prev = 7.78529, min = 7.638
+TTC lidar median x prev = 7.7945
+TTC lidar average x curr = 7.72909, min = 7.577
+TTC lidar median x curr = 7.734, 1/vel = 1.6529
+
+
+### FP.6 Performance Evaluation 2
+
+- All detector / descriptor combinations implemented in previous chapters have been compared with regard to the TTC estimate on a frame-by-frame basis. To facilitate comparison, a spreadsheet and graph should be used to represent the different TTCs. 
+
+The final_csv in the output folder has all the decriptors/detectors combinations along with the 
+TTC for camera, TTC for lidar , TCC diff and Keypoints number and lidar points number.
+
+
+<img src="output/final_csv2.png"/>
+
+The result shows some TTC camera based with (inf and non) due to the limited number of keypoints in this case which make the problem in the calculation of distance ratio.
+
+<img src="output/nan_inf.png"/>
+ 
+
+
