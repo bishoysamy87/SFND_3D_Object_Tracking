@@ -104,7 +104,7 @@ void clusterLidarWithROI(std::vector<BoundingBox> &boundingBoxes, std::vector<Li
 }
 
 
-void show3DObjects(std::vector<BoundingBox> &boundingBoxes, cv::Size worldSize, cv::Size imageSize, bool bWait)
+void show3DObjects(std::vector<BoundingBox> &boundingBoxes, cv::Size worldSize, cv::Size imageSize, std::string imageNumber,bool bWait)
 {
     // create topview image
     cv::Mat topviewImg(imageSize, CV_8UC3, cv::Scalar(0, 0, 0));
@@ -112,11 +112,9 @@ void show3DObjects(std::vector<BoundingBox> &boundingBoxes, cv::Size worldSize, 
     for(auto it1=boundingBoxes.begin(); it1!=boundingBoxes.end(); ++it1)
     {
         // create randomized color for current 3D object
-        cout << "ID = " <<it1->boxID << "size lidar points" << it1->lidarPoints.size() << endl;
         cv::RNG rng(it1->boxID);
         cv::Scalar currColor = cv::Scalar(rng.uniform(0,150), rng.uniform(0, 150), rng.uniform(0, 150));
         //cv::Scalar currColor = cv::Scalar(150, 150, 150);
-        cout << currColor<<endl;
         // plot Lidar points into top view image
         int top=1e8, left=1e8, bottom=0.0, right=0.0; 
         float xwmin=1e8, ywmin=1e8, ywmax=-1e8;
@@ -156,7 +154,7 @@ void show3DObjects(std::vector<BoundingBox> &boundingBoxes, cv::Size worldSize, 
     }
 
     // plot distance markers
-    float lineSpacing = 2.0; // gap between distance markers
+    float lineSpacing = 1.0; // gap between distance markers
     int nMarkers = floor(worldSize.height / lineSpacing);
     for (size_t i = 0; i < nMarkers; ++i)
     {
@@ -166,8 +164,9 @@ void show3DObjects(std::vector<BoundingBox> &boundingBoxes, cv::Size worldSize, 
 
     // display image
     string windowName = "3D Objects";
-    cv::namedWindow(windowName, 1);
-    cv::imshow(windowName, topviewImg);
+    //cv::namedWindow(windowName, 1);
+    //cv::imshow(windowName, topviewImg);
+    cv::imwrite("../output/lidarImage"+imageNumber+".jpg", topviewImg);
 
     if(bWait)
     {
@@ -179,7 +178,19 @@ void show3DObjects(std::vector<BoundingBox> &boundingBoxes, cv::Size worldSize, 
 // associate a given bounding box with the keypoints it contains
 void clusterKptMatchesWithROI(BoundingBox &boundingBox, std::vector<cv::KeyPoint> &kptsPrev, std::vector<cv::KeyPoint> &kptsCurr, std::vector<cv::DMatch> &kptMatches)
 {
-    // ...
+    for(auto itr = kptMatches.begin(); itr != kptMatches.end(); ++itr)
+    {
+        // get current keypoint and its matched partner in the prev. frame
+        cv::KeyPoint kpOuterCurr = kptsCurr.at(itr->trainIdx);
+        cv::KeyPoint kpOuterPrev = kptsPrev.at(itr->queryIdx);
+
+        if(boundingBox.roi.contains(kpOuterCurr.pt))
+        {
+            boundingBox.keypoints.push_back(kpOuterCurr);
+            boundingBox.kptMatches.push_back(*itr);
+        }
+
+    }
 }
 
 
@@ -187,18 +198,190 @@ void clusterKptMatchesWithROI(BoundingBox &boundingBox, std::vector<cv::KeyPoint
 void computeTTCCamera(std::vector<cv::KeyPoint> &kptsPrev, std::vector<cv::KeyPoint> &kptsCurr, 
                       std::vector<cv::DMatch> kptMatches, double frameRate, double &TTC, cv::Mat *visImg)
 {
-    // ...
+    double dT;
+        // compute distance ratios between all matched keypoints
+    vector<double> distRatios; // stores the distance ratios for all keypoints between curr. and prev. frame
+    for (auto it1 = kptMatches.begin(); it1 != kptMatches.end() - 1; ++it1)
+    { // outer kpt. loop
+
+        // get current keypoint and its matched partner in the prev. frame
+        cv::KeyPoint kpOuterCurr = kptsCurr.at(it1->trainIdx);
+        cv::KeyPoint kpOuterPrev = kptsPrev.at(it1->queryIdx);
+
+        for (auto it2 = kptMatches.begin() + 1; it2 != kptMatches.end(); ++it2)
+        { // inner kpt.-loop
+
+            double minDist = 100.0; // min. required distance
+
+            // get next keypoint and its matched partner in the prev. frame
+            cv::KeyPoint kpInnerCurr = kptsCurr.at(it2->trainIdx);
+            cv::KeyPoint kpInnerPrev = kptsPrev.at(it2->queryIdx);
+
+            // compute distances and distance ratios
+            double distCurr = cv::norm(kpOuterCurr.pt - kpInnerCurr.pt);
+            double distPrev = cv::norm(kpOuterPrev.pt - kpInnerPrev.pt);
+
+            if (distPrev > std::numeric_limits<double>::epsilon() && distCurr >= minDist)
+            { // avoid division by zero
+
+                double distRatio = distCurr / distPrev;
+                distRatios.push_back(distRatio);
+            }
+        } // eof inner loop over all matched kpts
+    }     // eof outer loop over all matched kpts
+
+    // only continue if list of distance ratios is not empty
+    if (distRatios.size() == 0)
+    {
+        TTC = NAN;
+        return;
+    }
+
+    std::sort(distRatios.begin(), distRatios.end());
+    long medIndex = floor(distRatios.size() / 2.0);
+    double medDistRatio = distRatios.size() % 2 == 0 ? (distRatios[medIndex - 1] + distRatios[medIndex]) / 2.0 : distRatios[medIndex]; // compute median dist. ratio to remove outlier influence
+    cout << "camera TTC medDistRatio = " << medDistRatio << endl;
+    dT = 1 / frameRate;
+    TTC = -dT / (1 - medDistRatio);
 }
 
 
 void computeTTCLidar(std::vector<LidarPoint> &lidarPointsPrev,
                      std::vector<LidarPoint> &lidarPointsCurr, double frameRate, double &TTC)
 {
-    // ...
+        // find closest distance to Lidar points within ego lane
+    double minXPrev = 1e9, minXCurr = 1e9;
+    double sum_XPrev = 0, sum_XCurr = 0;
+    double dT = 1 / frameRate;
+    double average_XPrev,average_XCurr,medDistPrev,medDistCurr;
+    vector<double> xDistPrev;
+    vector<double> xDistCurr;
+    for (auto it = lidarPointsPrev.begin(); it != lidarPointsPrev.end(); ++it)
+    {
+        minXPrev = minXPrev > it->x ? it->x : minXPrev;
+        sum_XPrev += it->x;
+        xDistPrev.push_back(it->x);
+    }
+    average_XPrev =sum_XPrev/ lidarPointsPrev.size();
+    std::sort(xDistPrev.begin(), xDistPrev.end());
+    long medIndex = floor(xDistPrev.size() / 2.0);
+    medDistPrev = xDistPrev.size() % 2 == 0 ? (xDistPrev[medIndex - 1] + xDistPrev[medIndex]) / 2.0 : xDistPrev[medIndex]; 
+
+    cout << "average x _prev = "<< average_XPrev << ", min = " <<minXPrev <<endl;
+    cout << "TTC lidar median x prev = "<< medDistPrev<<endl;
+    
+    // if((average_XPrev > (minXPrev + 0.5)) || ((average_XPrev < (minXPrev - 0.5))))
+    // {
+    //     minXPrev = average_XPrev;
+    // }
+
+    for (auto it = lidarPointsCurr.begin(); it != lidarPointsCurr.end(); ++it)
+    {
+        minXCurr = minXCurr > it->x ? it->x : minXCurr;
+        sum_XCurr += it->x;
+        xDistCurr.push_back(it->x);
+    }
+    average_XCurr = sum_XCurr/ lidarPointsCurr.size();
+    std::sort(xDistCurr.begin(), xDistCurr.end());
+    medIndex = floor(xDistCurr.size() / 2.0);
+    medDistCurr = xDistCurr.size() % 2 == 0 ? (xDistCurr[medIndex - 1] + xDistCurr[medIndex]) / 2.0 : xDistCurr[medIndex]; 
+
+    cout << "TTC lidar average x curr = "<< average_XCurr << ", min = " <<minXCurr <<endl;
+    cout << "TTC lidar median x curr = "<< medDistCurr << ", vel = " <<dT / (medDistPrev - medDistCurr) <<endl;
+    // if((average_XCurr > (minXCurr + 0.5)) || ((average_XCurr < (minXCurr - 0.5))))
+    // {
+    //     minXCurr = average_XCurr;
+    // }
+
+    // compute TTC from both measurements
+    
+    TTC = medDistCurr * dT / (medDistPrev - medDistCurr);
 }
 
 
 void matchBoundingBoxes(std::vector<cv::DMatch> &matches, std::map<int, int> &bbBestMatches, DataFrame &prevFrame, DataFrame &currFrame)
 {
-    // ...
+    int occu;
+    int max_occu = 0;
+    int best_box_id;
+    float shrinkFactor = 0.10;
+    bool bWait = false;
+    std::multimap<int, int>  multmap;
+    for(auto itr1 = matches.begin(); itr1 != matches.end();++itr1)
+    {
+        /*get the prev keypoint and current keypoint*/
+        cv::KeyPoint prevKp =  prevFrame.keypoints[itr1->queryIdx];
+        cv::KeyPoint currentKp =  prevFrame.keypoints[itr1->trainIdx];
+
+        int prevBoxID = -1;
+        int currBoxId = -1;
+        for(auto it2 = prevFrame.boundingBoxes.begin(); it2!= prevFrame.boundingBoxes.end(); ++it2)
+        {
+            cv::Rect smallerBox;
+            smallerBox.x = (*it2).roi.x + shrinkFactor * (*it2).roi.width / 2.0;
+            smallerBox.y = (*it2).roi.y + shrinkFactor * (*it2).roi.height / 2.0;
+            smallerBox.width = (*it2).roi.width * (1 - shrinkFactor);
+            smallerBox.height = (*it2).roi.height * (1 - shrinkFactor);
+            if(smallerBox.contains(prevKp.pt))
+            {
+                prevBoxID = it2->boxID;
+            }
+        }
+
+        for(auto it2 = currFrame.boundingBoxes.begin(); it2!= currFrame.boundingBoxes.end(); ++it2)
+        {
+            cv::Rect smallerBox;
+            smallerBox.x = (*it2).roi.x + shrinkFactor * (*it2).roi.width / 2.0;
+            smallerBox.y = (*it2).roi.y + shrinkFactor * (*it2).roi.height / 2.0;
+            smallerBox.width = (*it2).roi.width * (1 - shrinkFactor);
+            smallerBox.height = (*it2).roi.height * (1 - shrinkFactor);
+            if(smallerBox.contains(prevKp.pt))
+            {
+                currBoxId = it2->boxID;
+            }
+        }
+
+        if(currBoxId != -1 && prevBoxID != -1)
+        {
+            multmap.insert(pair<int,int>(currBoxId,prevBoxID));
+        }
+    }
+
+    int maxcount = 0;
+    int max_Id = -1;
+    std::vector<int> prevIDs;
+    for(auto mappItr = multmap.begin();mappItr!=multmap.end();++mappItr)
+    {
+        auto it = multmap.equal_range(mappItr->first); 
+        maxcount = 0;
+        std::multimap<int, int>  multmap2;
+        for(auto itr = it.first; itr != it.second ; ++itr)
+        {
+            //cout << "multmap2 = " << itr->second <<" , " << itr->first << endl;
+            multmap2.insert(pair<int,int>(itr->second,itr->first));
+            prevIDs.push_back(itr->second);
+        }
+        for(auto itr= prevIDs.begin();itr != prevIDs.end(); ++ itr)
+        {
+            int count = multmap2.count((*itr));
+            if(count>maxcount)
+            {
+                maxcount = count;
+                //cout << "max count = "<< maxcount << endl;
+                max_Id = (*itr);
+            }
+        }
+        if(max_Id!=-1)
+        {
+            bbBestMatches.insert(pair<int,int>(max_Id, mappItr->first));
+        }
+        else
+        {
+            cout<<"error" << endl;
+        }
+    }
+    if(bWait)
+    {
+        cv::waitKey(0); // wait for key to be pressed
+    }
 }
