@@ -42,6 +42,7 @@ int main(int argc, const char *argv[])
 
     myfile << "img_scenario,detector,descriptor,keypoint_numbers,time_taken_detector,keypoint_number_in front_ego_car, time_taken_discriptor, matched_keypoints"<<endl;;
     myfile.open ("../output/final_result.csv");
+    myfile<<"Image scenario, Box Id, detector type , descriptor type, ttc_lidar, ttc_camera, ttc abs_diff, KPTMAtch_NUM, NUM_lidar_points"<<endl;
     // object detection
     string yoloBasePath = dataPath + "dat/yolo/";
     string yoloClassesFile = yoloBasePath + "coco.names";
@@ -315,7 +316,7 @@ int main(int argc, const char *argv[])
                             double ttcLidar; 
                             computeTTCLidar(prevBB->lidarPoints, currBB->lidarPoints, sensorFrameRate, ttcLidar);
                             //// EOF STUDENT ASSIGNMENT
-                            myfile<<imagescenario<<"," << currBB->boxID<< "," <<ttcLidar<< ",";
+                            myfile<<imagescenario<<"," << currBB->boxID<< ","<<detectorType<<","<<descriptorType<< "," <<ttcLidar<< ",";
 
 
                             //// STUDENT ASSIGNMENT
@@ -325,7 +326,7 @@ int main(int argc, const char *argv[])
                             clusterKptMatchesWithROI(*currBB, (dataBuffer.end() - 2)->keypoints, (dataBuffer.end() - 1)->keypoints, (dataBuffer.end() - 1)->kptMatches);                    
                             computeTTCCamera((dataBuffer.end() - 2)->keypoints, (dataBuffer.end() - 1)->keypoints, currBB->kptMatches, sensorFrameRate, ttcCamera);
                             //// EOF STUDENT ASSIGNMENT
-                            myfile<<detectorType<<","<<descriptorType<< ","<<ttcCamera;
+                            myfile<<ttcCamera<<","<<fabs(ttcLidar - ttcCamera)<<","<<currBB->keypoints.size()<<","<<currBB->lidarPoints.size();
                             myfile<<endl;
                             bVis = true;
                             if (bVis)
